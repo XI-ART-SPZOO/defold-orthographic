@@ -1,4 +1,4 @@
-local camera = require "orthographic.camera"
+local ortho = require "orthographic.camera"
 
 local CLEAR_COLOR = hash("clear_color")
 
@@ -30,16 +30,18 @@ function update(self)
 
 	-- draw world per camera
 	local cameras = camera.get_cameras()
-	if #cameras > 0 then
+	local camera_count = #cameras
+	if camera_count > 0 then
 		render.disable_state(render.STATE_DEPTH_TEST)
 		render.disable_state(render.STATE_CULL_FACE)
 		render.disable_state(render.STATE_STENCIL_TEST)
-		for _,camera_id in ipairs(cameras) do
-			local viewport = camera.get_viewport(camera_id)
+		for i=1,camera_count do
+			local cam = cameras[i]
+			local viewport = ortho.get_viewport(cam.path)
 			render.set_viewport(viewport.x, viewport.y, viewport.z, viewport.w)
-			local view = camera.get_view(camera_id)
+			local view = camera.get_view(cam)
 			render.set_view(view)
-			local proj = camera.get_projection(camera_id)
+			local proj = camera.get_projection(cam)
 			render.set_projection(proj)
 			local frustum = proj * view
 			render.draw(self.tile_pred, {frustum = frustum})

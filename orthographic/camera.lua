@@ -38,6 +38,10 @@ local WINDOW_HEIGHT = DISPLAY_HEIGHT
 local WINDOW_MIDDLE = vmath.vector3(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2, 0)
 
 local VECTOR3_ZERO = vmath.vector3(0)
+local VECTOR4_ZERO = vmath.vector4(0)
+local DEFAULT_VIEWPORT = vmath.vector4(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+local DEFAULT_VIEW = vmath.matrix4()
+local DEFAULT_PROJECTION = vmath.matrix4_orthographic(0, DISPLAY_WIDTH, 0, DISPLAY_HEIGHT, -1, 1)
 
 local cameras = {}
 local camera_ids = {}
@@ -130,9 +134,9 @@ local function refresh_cameras()
 	if cameras_dirty then
 		cameras_dirty = false
 		local enabled_cameras = {}
-		for camera_id,camera in pairs(cameras) do
-			if camera.enabled then
-				enabled_cameras[#enabled_cameras + 1] = camera
+		for camera_id,cam in pairs(cameras) do
+			if cam.enabled then
+				enabled_cameras[#enabled_cameras + 1] = cam
 			end
 		end
 		table.sort(enabled_cameras, function(a, b)
@@ -147,37 +151,37 @@ local function refresh_cameras()
 	end
 end
 
-local function calculate_auto_zoom(camera)
-	local viewport = camera.viewport
+local function calculate_auto_zoom(cam)
+	local viewport = cam.viewport
 	local ww = (viewport.z or WINDOW_WIDTH) / dpi_ratio
 	local wh = (viewport.w or WINDOW_HEIGHT) / dpi_ratio
 
 	return math.min(ww / DISPLAY_WIDTH, wh / DISPLAY_HEIGHT)
 end
 
-local function update_from_properties(camera)
+local function update_from_properties(cam)
 	-- from camera component
-	camera.view = go.get(camera.component_url, "view")
-	camera.projection = go.get(camera.component_url, "projection")
+	cam.view = go.get(cam.component_url, "view")
+	cam.projection = go.get(cam.component_url, "projection")
 
 	-- from script component
-	camera.near_z = go.get(camera.url, "near_z")
-	camera.far_z = go.get(camera.url, "far_z")
-	camera.zoom = go.get(camera.url, "zoom")
-	camera.automatic_zoom = go.get(camera.url, "automatic_zoom")
-	if camera.automatic_zoom then
-		local zoom = calculate_auto_zoom(camera)
-		camera.zoom = zoom
-		msg.post(camera.url, M.MSG_ZOOM_TO, { zoom = zoom })
+	cam.near_z = go.get(cam.url, "near_z")
+	cam.far_z = go.get(cam.url, "far_z")
+	cam.zoom = go.get(cam.url, "zoom")
+	cam.automatic_zoom = go.get(cam.url, "automatic_zoom")
+	if cam.automatic_zoom then
+		local zoom = calculate_auto_zoom(cam)
+		cam.zoom = zoom
+		msg.post(cam.url, M.MSG_ZOOM_TO, { zoom = zoom })
 	end
 end
 
 
-local function update_viewport(camera)
-	local viewport_top = go.get(camera.url, "viewport_top")
-	local viewport_left = go.get(camera.url, "viewport_left")
-	local viewport_bottom = go.get(camera.url, "viewport_bottom")
-	local viewport_right = go.get(camera.url, "viewport_right")
+local function update_viewport(cam)
+	local viewport_top = go.get(cam.url, "viewport_top")
+	local viewport_left = go.get(cam.url, "viewport_left")
+	local viewport_bottom = go.get(cam.url, "viewport_bottom")
+	local viewport_right = go.get(cam.url, "viewport_right")
 	if viewport_top == 0 then
 		viewport_top = WINDOW_HEIGHT
 	else
@@ -194,55 +198,55 @@ local function update_viewport(camera)
 	if viewport_bottom ~= 0 then
 		viewport_bottom = viewport_bottom * dpi_ratio
 	end
-	camera.viewport.x = viewport_left
-	camera.viewport.y = viewport_bottom
-	camera.viewport.z = math.max(viewport_right - viewport_left, 1)
-	camera.viewport.w = math.max(viewport_top - viewport_bottom, 1)
+	cam.viewport.x = viewport_left
+	cam.viewport.y = viewport_bottom
+	cam.viewport.z = math.max(viewport_right - viewport_left, 1)
+	cam.viewport.w = math.max(viewport_top - viewport_bottom, 1)
 end
 
-local function shake(camera, dt)
-	if not camera.shake or dt == 0 then return end
+local function shake(cam, dt)
+	if not cam.shake or dt == 0 then return end
 
-	camera.shake.duration = camera.shake.duration - dt
-	if camera.shake.duration < 0 then
-		if camera.shake.cb then camera.shake.cb() end
-		camera.shake = nil
+	cam.shake.duration = cam.shake.duration - dt
+	if cam.shake.duration < 0 then
+		if cam.shake.cb then cam.shake.cb() end
+		cam.shake = nil
 	else
-		if camera.shake.horizontal then
-			camera.shake.offset.x = (DISPLAY_WIDTH * camera.shake.intensity) * (math.random() - 0.5)
+		if cam.shake.horizontal then
+			cam.shake.offset.x = (DISPLAY_WIDTH * cam.shake.intensity) * (math.random() - 0.5)
 		end
-		if camera.shake.vertical then
-			camera.shake.offset.y = (DISPLAY_HEIGHT * camera.shake.intensity) * (math.random() - 0.5)
+		if cam.shake.vertical then
+			cam.shake.offset.y = (DISPLAY_HEIGHT * cam.shake.intensity) * (math.random() - 0.5)
 		end
 	end
 end
 
-local function recoil(camera, dt)
-	if not camera.recoil then return end
+local function recoil(cam, dt)
+	if not cam.recoil then return end
 
-	camera.recoil.time_left = camera.recoil.time_left - dt
-	if camera.recoil.time_left < 0 then
-		camera.recoil = nil
+	cam.recoil.time_left = cam.recoil.time_left - dt
+	if cam.recoil.time_left < 0 then
+		cam.recoil = nil
 	else
-		local t = camera.recoil.time_left / camera.recoil.duration
-		camera.recoil.offset = vmath.lerp(t, VECTOR3_ZERO, camera.recoil.offset)
-		camera.recoil.offset.z = 0
+		local t = cam.recoil.time_left / cam.recoil.duration
+		cam.recoil.offset = vmath.lerp(t, VECTOR3_ZERO, cam.recoil.offset)
+		cam.recoil.offset.z = 0
 	end
 end
 
-local function update_offset(camera)
+local function update_offset(cam)
 	local offset = VECTOR3_ZERO
-	camera.previous_offset = camera.offset or VECTOR3_ZERO
-	if camera.shake or camera.recoil then
-		if camera.shake then
-			offset = offset + camera.shake.offset
+	cam.previous_offset = cam.offset or VECTOR3_ZERO
+	if cam.shake or cam.recoil then
+		if cam.shake then
+			offset = offset + cam.shake.offset
 		end
-		if camera.recoil then
-			offset = offset + camera.recoil.offset
+		if cam.recoil then
+			offset = offset + cam.recoil.offset
 		end
 		offset.z = 0
 	end
-	camera.offset = offset
+	cam.offset = offset
 end
 
 
@@ -268,33 +272,33 @@ local function calculate_world_center(ids)
 end
 
 local follow_tmp_v3 = vmath.vector3()
-local function follow(camera, dt, camera_world_pos)
-	local follow_enabled = go.get(camera.url, "follow")
+local function follow(cam, dt, camera_world_pos)
+	local follow_enabled = go.get(cam.url, "follow")
 	if not follow_enabled then
 		return
 	end
 
-	local follow_horizontal = go.get(camera.url, "follow_horizontal")
-	local follow_vertical = go.get(camera.url, "follow_vertical")
-	local follow_offset = go.get(camera.url, "follow_offset")
+	local follow_horizontal = go.get(cam.url, "follow_horizontal")
+	local follow_vertical = go.get(cam.url, "follow_vertical")
+	local follow_offset = go.get(cam.url, "follow_offset")
 	
 	local target_world_pos
-	if camera.targets then
-		target_world_pos = calculate_world_center(camera.targets)
+	if cam.targets then
+		target_world_pos = calculate_world_center(cam.targets)
 	else
-		local follow_target = go.get(camera.url, "follow_target")
+		local follow_target = go.get(cam.url, "follow_target")
 		if not check_game_object(follow_target) then
-			log("Camera '%s' has a follow target '%s' that does not exist", tostring(camera.id), tostring(follow_target))
+			log("Camera '%s' has a follow target '%s' that does not exist", tostring(cam.id), tostring(follow_target))
 			return
 		end
 		target_world_pos = go.get_world_position(follow_target)
 	end
 	target_world_pos = target_world_pos + follow_offset
 	
-	local deadzone_top = go.get(camera.url, "deadzone_top")
-	local deadzone_left = go.get(camera.url, "deadzone_left")
-	local deadzone_right = go.get(camera.url, "deadzone_right")
-	local deadzone_bottom = go.get(camera.url, "deadzone_bottom")
+	local deadzone_top = go.get(cam.url, "deadzone_top")
+	local deadzone_left = go.get(cam.url, "deadzone_left")
+	local deadzone_right = go.get(cam.url, "deadzone_right")
+	local deadzone_bottom = go.get(cam.url, "deadzone_bottom")
 	if deadzone_top ~= 0 or deadzone_left ~= 0 or deadzone_right ~= 0 or deadzone_bottom ~= 0 then
 		follow_tmp_v3.x = camera_world_pos.x
 		follow_tmp_v3.y = camera_world_pos.y
@@ -323,20 +327,20 @@ local function follow(camera, dt, camera_world_pos)
 	if not follow_horizontal then
 		follow_tmp_v3.x = camera_world_pos.x
 	end
-	local follow_lerp = go.get(camera.url, "follow_lerp")
+	local follow_lerp = go.get(cam.url, "follow_lerp")
 	local lerped_pos = lerp_with_dt(follow_lerp, dt, camera_world_pos, follow_tmp_v3)
 	camera_world_pos.x = lerped_pos.x
 	camera_world_pos.y = lerped_pos.y
 	camera_world_pos.z = follow_tmp_v3.z
 end
 
-local function apply_bounds(camera, camera_world_pos)
-	local bounds_top = go.get(camera.url, "bounds_top")
-	local bounds_left = go.get(camera.url, "bounds_left")
-	local bounds_bottom = go.get(camera.url, "bounds_bottom")
-	local bounds_right = go.get(camera.url, "bounds_right")
+local function apply_bounds(cam, camera_world_pos)
+	local bounds_top = go.get(cam.url, "bounds_top")
+	local bounds_left = go.get(cam.url, "bounds_left")
+	local bounds_bottom = go.get(cam.url, "bounds_bottom")
+	local bounds_right = go.get(cam.url, "bounds_right")
 	if bounds_top ~= 0 or bounds_left ~= 0 or bounds_bottom ~= 0 or bounds_right ~= 0 then
-		local camera_id = camera.id
+		local camera_id = cam.id
 		local cp = M.world_to_screen(camera_id, vmath.vector3(camera_world_pos))
 		local tr = M.world_to_screen(camera_id, vmath.vector3(bounds_right, bounds_top, 0))
 		local bl = M.world_to_screen(camera_id, vmath.vector3(bounds_left, bounds_bottom, 0))
@@ -385,19 +389,21 @@ function M.init(camera_id, _, settings)
 	assert(camera_id, "You must provide a camera id")
 	cameras[camera_id] = settings
 	cameras_dirty = true
-	local camera = cameras[camera_id]
-	camera.id = camera_id
-	camera.url = msg.url(nil, camera_id, "script")
-	camera.component_url = msg.url(nil, camera_id, "camera")
-	camera.viewport = vmath.vector4()
-	camera.offset = vmath.vector3()
-	camera.previous_offset = vmath.vector3()
+	local cam = cameras[camera_id]
+	cam.id = camera_id
+	cam.url = msg.url(nil, camera_id, "script")
+	cam.component_url = msg.url(nil, camera_id, "camera")
+	cam.viewport = vmath.vector4()
+	cam.offset = vmath.vector3()
+	cam.previous_offset = vmath.vector3()
 	update_window_size()
-	update_from_properties(camera)
-	update_viewport(camera)
+	update_from_properties(cam)
+	update_viewport(cam)
 
 	if not sys.get_engine_info().is_debug then
 		log = function() end
+	else
+		print(camera_id)
 	end
 end
 
@@ -427,39 +433,39 @@ end
 -- @param dt
 function M.update(camera_id, dt)
 	assert(camera_id, "You must provide a camera id")
-	local camera = cameras[camera_id]
-	if not camera then
+	local cam = cameras[camera_id]
+	if not cam then
 		return
 	end
 	local url = msg.url()
-	if camera.url.socket ~= url.socket then
+	if cam.url.socket ~= url.socket then
 		return
 	end
 
-	local enabled = go.get(camera.url, "enabled")
-	local order = go.get(camera.url, "order")
-	cameras_dirty = cameras_dirty or (camera.enabled ~= enabled)
-	cameras_dirty = cameras_dirty or (camera.order ~= order)
-	camera.enabled = enabled
-	camera.order = order
+	local enabled = go.get(cam.url, "enabled")
+	local order = go.get(cam.url, "order")
+	cameras_dirty = cameras_dirty or (cam.enabled ~= enabled)
+	cameras_dirty = cameras_dirty or (cam.order ~= order)
+	cam.enabled = enabled
+	cam.order = order
 	if not enabled then
 		return
 	end
 
 	go.update_world_transform(camera_id)
 	local camera_world_pos = go.get_world_position(camera_id)
-	local camera_world_to_local_diff = camera_world_pos - go.get_position(camera.id)
+	local camera_world_to_local_diff = camera_world_pos - go.get_position(cam.id)
 
 	update_window_size()
-	update_from_properties(camera)
-	update_viewport(camera)
-	follow(camera, dt, camera_world_pos)
-	apply_bounds(camera, camera_world_pos)
-	shake(camera, dt)
-	recoil(camera, dt)
-	update_offset(camera) -- must be called after shake() and recoil()
+	update_from_properties(cam)
+	update_viewport(cam)
+	follow(cam, dt, camera_world_pos)
+	apply_bounds(cam, camera_world_pos)
+	shake(cam, dt)
+	recoil(cam, dt)
+	update_offset(cam) -- must be called after shake() and recoil()
 
-	local new_camera_position = camera_world_pos + camera_world_to_local_diff + camera.offset - camera.previous_offset
+	local new_camera_position = camera_world_pos + camera_world_to_local_diff + cam.offset - cam.previous_offset
 	go.set_position(new_camera_position, camera_id)
 	
 	refresh_cameras()
@@ -485,26 +491,28 @@ function M.follow(camera_id, targets, options)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
 	assert(targets, "You must provide a target")
-	local camera = cameras[camera_id]
-	local lerp = options and options.lerp
-	local offset = options and options.offset
-	local horizontal = options and options.horizontal
-	local vertical = options and options.vertical
-	local immediate = options and options.immediate
-	if horizontal == nil then horizontal = true end
-	if vertical == nil then vertical = true end
+	local cam = cameras[camera_id]
+	if cam then
+		local lerp = options and options.lerp
+		local offset = options and options.offset
+		local horizontal = options and options.horizontal
+		local vertical = options and options.vertical
+		local immediate = options and options.immediate
+		if horizontal == nil then horizontal = true end
+		if vertical == nil then vertical = true end
 
-	if type(targets) == "table" then
-		camera.targets = targets
-	else
-		msg.post(cameras[camera_id].url, M.MSG_FOLLOW, {
-			target = targets,
-			lerp = lerp,
-			offset = offset,
-			horizontal = horizontal,
-			vertical = vertical,
-			immediate = immediate,
-		})
+		if type(targets) == "table" then
+			cam.targets = targets
+		else
+			msg.post(cam.url, M.MSG_FOLLOW, {
+				target = targets,
+				lerp = lerp,
+				offset = offset,
+				horizontal = horizontal,
+				vertical = vertical,
+				immediate = immediate,
+			})
+		end
 	end
 end
 
@@ -514,7 +522,8 @@ end
 function M.unfollow(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	msg.post(cameras[camera_id].url, M.MSG_UNFOLLOW)
+	local cam = cameras[camera_id]
+	if cam then msg.post(cam.url, M.MSG_UNFOLLOW) end
 end
 
 
@@ -525,7 +534,8 @@ function M.follow_offset(camera_id, offset)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
 	assert(offset, "You must provide an offset")
-	msg.post(cameras[camera_id].url, M.MSG_FOLLOW_OFFSET, { offset = offset })
+	local cam = cameras[camera_id]
+	if cam then msg.post(cam.url, M.MSG_FOLLOW_OFFSET, { offset = offset }) end
 end
 
 
@@ -538,11 +548,13 @@ end
 function M.deadzone(camera_id, left, top, right, bottom)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	local camera = cameras[camera_id]
-	if left and right and top and bottom then
-		msg.post(camera.url, M.MSG_DEADZONE, { left = left, top = top, right = right, bottom = bottom })
-	else
-		msg.post(camera.url, M.MSG_DEADZONE)
+	local cam = cameras[camera_id]
+	if cam then
+		if left and right and top and bottom then
+			msg.post(cam.url, M.MSG_DEADZONE, { left = left, top = top, right = right, bottom = bottom })
+		else
+			msg.post(cam.url, M.MSG_DEADZONE)
+		end
 	end
 end
 
@@ -556,11 +568,13 @@ end
 function M.bounds(camera_id, left, top, right, bottom)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	local camera = cameras[camera_id]
-	if left and top and right and bottom then
-		msg.post(camera.url, M.MSG_BOUNDS, { left = left, top = top, right = right, bottom = bottom })
-	else
-		msg.post(camera.url, M.MSG_BOUNDS)
+	local cam = cameras[camera_id]
+	if cam then
+		if left and top and right and bottom then
+			msg.post(cam.url, M.MSG_BOUNDS, { left = left, top = top, right = right, bottom = bottom })
+		else
+			msg.post(cam.url, M.MSG_BOUNDS)
+		end
 	end
 end
 
@@ -574,14 +588,17 @@ end
 function M.shake(camera_id, intensity, duration, direction, cb)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	cameras[camera_id].shake = {
-		intensity = intensity or 0.05,
-		duration = duration or 0.5,
-		horizontal = direction ~= M.SHAKE_VERTICAL or false,
-		vertical = direction ~= M.SHAKE_HORIZONTAL or false,
-		offset = vmath.vector3(0),
-		cb = cb,
-	}
+	local cam = cameras[camera_id]
+	if cam then
+		cam.shake = {
+			intensity = intensity or 0.05,
+			duration = duration or 0.5,
+			horizontal = direction ~= M.SHAKE_VERTICAL or false,
+			vertical = direction ~= M.SHAKE_HORIZONTAL or false,
+			offset = vmath.vector3(0),
+			cb = cb,
+		}
+	end
 end
 
 
@@ -590,7 +607,8 @@ end
 function M.stop_shaking(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	cameras[camera_id].shake = nil
+	local cam = cameras[camera_id]
+	if cam then cam.shake = nil end
 end
 
 
@@ -601,25 +619,28 @@ end
 function M.recoil(camera_id, offset, duration)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a strength id")
-	cameras[camera_id].recoil = {
-		offset = offset,
-		duration = duration or 0.5,
-		time_left = duration or 0.5,
-	}
+	local cam = cameras[camera_id]
+	if cam then
+		cam.recoil = {
+			offset = offset,
+			duration = duration or 0.5,
+			time_left = duration or 0.5,
+		}
+	end
 end
 
 function M.get_automatic_zoom(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	local camera = cameras[camera_id]
-	return camera.automatic_zoom
+	local cam = cameras[camera_id]
+	return cam and cam.automatic_zoom or false
 end
 
 function M.set_automatic_zoom(camera_id, enabled)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	local camera = cameras[camera_id]
-	msg.post(camera.url, M.MSG_SET_AUTOMATIC_ZOOM, { enabled = enabled})
+	local cam = cameras[camera_id]
+	if cam then msg.post(cam.url, M.MSG_SET_AUTOMATIC_ZOOM, { enabled = enabled}) end
 end
 
 --- Set the zoom level of a camera
@@ -629,8 +650,8 @@ function M.set_zoom(camera_id, zoom)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
 	assert(zoom, "You must provide a zoom level")
-	local camera = cameras[camera_id]
-	msg.post(camera.url, M.MSG_ZOOM_TO, { zoom = zoom })
+	local cam = cameras[camera_id]
+	if cam then msg.post(cam.url, M.MSG_ZOOM_TO, { zoom = zoom }) end
 end
 
 --- Get the zoom level of a camera
@@ -639,7 +660,8 @@ end
 function M.get_zoom(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	return cameras[camera_id].zoom
+	local cam = cameras[camera_id]
+	return cam and cam.zoom or 1
 end
 
 --- Get the projection matrix for a camera
@@ -648,7 +670,8 @@ end
 function M.get_projection(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	return camera.get_projection(cameras[camera_id].component_url)
+	local cam = cameras[camera_id]
+	return cam and camera.get_projection(cam.component_url) or DEFAULT_PROJECTION
 end
 
 --- Get the view matrix for a specific camera, based on the camera position
@@ -658,7 +681,8 @@ end
 function M.get_view(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	return camera.get_view(cameras[camera_id].component_url)
+	local cam = cameras[camera_id]
+	return cam and camera.get_view(cam.component_url) or DEFAULT_VIEW
 end
 
 
@@ -668,7 +692,8 @@ end
 function M.get_viewport(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	return cameras[camera_id].viewport
+	local cam = cameras[camera_id]
+	return cam and cam.viewport or DEFAULT_VIEWPORT
 end
 
 
@@ -678,7 +703,8 @@ end
 function M.get_offset(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	return cameras[camera_id].offset
+	local cam = cameras[camera_id]
+	return cam and cam.offset or vmath.vector3()
 end
 
 --- Convert screen coordinates to world coordinates based
@@ -692,7 +718,8 @@ function M.screen_to_world(camera_id, screen)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
 	assert(screen, "You must provide screen coordinates to convert")
-	return camera.screen_to_world(vmath.vector3(screen), cameras[camera_id].component_url)
+	local cam = cameras[camera_id]
+	return cam and camera.screen_to_world(vmath.vector3(screen), cam.component_url) or screen
 end
 
 --- Convert world coordinates to screen coordinates based
@@ -704,7 +731,8 @@ function M.world_to_screen(camera_id, world)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
 	assert(world, "You must provide world coordinates to convert")
-	return camera.world_to_screen(world, cameras[camera_id].component_url)
+	local cam = cameras[camera_id]
+	return cam and camera.world_to_screen(world, cam.component_url) or world
 end
 
 --- Get the screen bounds as world coordinates, ie where in world space the
@@ -714,11 +742,16 @@ end
 function M.screen_to_world_bounds(camera_id)
 	camera_id = camera_id or camera_ids[1]
 	assert(camera_id, "You must provide a camera id")
-	local url = cameras[camera_id].component_url
-	local ww, wh = window.get_size()
-	local bl = camera.screen_to_world(vmath.vector3(0, 0, 0), url)
-	local tr = camera.screen_to_world(vmath.vector3(ww, wh, 0), url)
-	return vmath.vector4(bl.x, tr.y, tr.x, bl.y)
+	local cam = cameras[camera_id]
+	if cam then
+		local url = cam.component_url
+		local ww, wh = window.get_size()
+		local bl = camera.screen_to_world(vmath.vector3(0, 0, 0), url)
+		local tr = camera.screen_to_world(vmath.vector3(ww, wh, 0), url)
+		return vmath.vector4(bl.x, tr.y, tr.x, bl.y)
+	else
+		return VECTOR4_ZERO
+	end
 end
 
 return M
