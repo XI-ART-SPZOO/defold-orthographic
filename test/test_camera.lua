@@ -5,7 +5,7 @@ local camera = require "orthographic.camera"
 local WIDTH = sys.get_config_number("display.width")
 local HEIGHT = sys.get_config_number("display.height")
 local DISPLAY_CENTER = vmath.vector3(WIDTH / 2, HEIGHT / 2, 0)
-local HIGHDPI = (sys.get_config("display.high_dpi", "0") == "1")
+local HIGHDPI = (sys.get_config_int("display.high_dpi", 0) == 1)
 
 telescope.make_assertion(
 	"xy",
